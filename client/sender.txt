@@ -1,0 +1,456 @@
+// Sender.tsx
+import { useSocket } from "@/hooks/useSocket";
+import { showError } from "@/hooks/useToast";
+import { revokeSenderAccess } from "@/store/accessSlice";
+import { useAppDispatch } from "@/store/hooks";
+import { triggerReconnect } from "@/store/socketSlice";
+import { Frame } from "@/ui/frame";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { twMerge } from "tailwind-merge";
+import { FiUpload, FiFile, FiTrash2 } from "react-icons/fi";
+import { Button } from "@/ui/button";
+
+const CHUNK_SIZE = 64 * 1024; // 64 KiB
+const BUFFERED_THRESHOLD = 4 * 1024 * 1024; // Pause sending if buffered > 4 MiB
+
+type SignalPayload =
+  | { type: "offer"; sdp: string }
+  | { type: "answer"; sdp: string }
+  | { type: "ice"; candidate: RTCIceCandidateInit }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  | { type: string; [k: string]: any }; // fallback for other control msgs
+
+export default function Sender() {
+  const dispatch = useAppDispatch();
+  const { socket } = useSocket();
+  const navigate = useNavigate();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // --- WebRTC refs & state ---
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  // typed queue for ICE candidates that arrive before remoteDescription
+  const remoteIceQueueRef = useRef<RTCIceCandidateInit[]>([]);
+  const [dataChannelOpen, setDataChannelOpen] = useState(false);
+
+  useEffect(() => {
+    console.log("Sender page mounted");
+
+    const handleRoomDestroyed = (data:{title:string,description?:string}) => {
+      navigate('/generate', { replace: true });
+      showError(data.title,data.description)
+    };
+    
+    if (socket) {
+      socket.on("room-destroyed", handleRoomDestroyed);
+    }
+    
+    return () => {
+      console.log("Sender page unmounted");
+
+      // leave-room on unmount
+      if (socket && socket.connected) {
+        socket.emit("leave-room");
+      }
+      
+      // Clean up event listener
+      if (socket) {
+        socket.off("room-destroyed", handleRoomDestroyed);
+      }
+
+      // cleanup rtc - log any error instead of swallowing it
+      try {
+        dcRef.current?.close();
+        pcRef.current?.close();
+      } catch (exc) {
+        console.warn("RTC cleanup error:", exc);
+      } finally {
+        pcRef.current = null;
+        dcRef.current = null;
+      }
+
+      dispatch(triggerReconnect())
+      dispatch(revokeSenderAccess());
+    }
+  }, [dispatch, socket, navigate]);
+
+  // -------------------------
+  // WebRTC Signaling & Setup
+  // -------------------------
+  useEffect(() => {
+    if (!socket) return;
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    pcRef.current = pc;
+
+    // create data channel (sender side)
+    const dc = pc.createDataChannel("file-transfer", { ordered: true });
+    dcRef.current = dc;
+
+    dc.onopen = () => {
+      console.log("Sender DataChannel open");
+      setDataChannelOpen(true);
+    };
+    dc.onclose = () => {
+      console.log("Sender DataChannel closed");
+      setDataChannelOpen(false);
+    };
+    dc.onmessage = (ev: MessageEvent<string | ArrayBuffer>) => {
+      // handle any control messages from receiver (acks, requests)
+      if (typeof ev.data === "string") {
+        try {
+          const m = JSON.parse(ev.data);
+          console.log("Sender got DC message:", m);
+        } catch (parseErr) {
+          // not JSON — ignore but log
+          console.warn("Sender DC: failed to parse control message", parseErr);
+        }
+      } else {
+        // we don't expect binary messages on sender; but keep safe logging
+        console.log("Sender received binary message (unexpected)", ev.data);
+      }
+    };
+
+    // ICE candidate -> emit to server
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        socket.emit("signal", { type: "ice", candidate: ev.candidate.toJSON() });
+      }
+    };
+
+    // handle remote signals from server
+    const handleSignal = async (payload: SignalPayload) => {
+      if (!pcRef.current) return;
+      if (!payload || typeof payload !== "object") return;
+
+      if (payload.type === "answer") {
+        try {
+          await pcRef.current.setRemoteDescription({ type: "answer", sdp: payload.sdp });
+          // flush queued candidates
+          while (remoteIceQueueRef.current.length) {
+            const c = remoteIceQueueRef.current.shift();
+            if (c) {
+              // addIceCandidate expects RTCIceCandidateInit
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(c)).catch((err) => {
+                console.warn("addIceCandidate (flushed) error:", err);
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Error setting remote answer:", err);
+        }
+      } else if (payload.type === "ice") {
+        const remoteDesc = pcRef.current.remoteDescription;
+        if (!remoteDesc || !remoteDesc.type) {
+          // queue candidate if remote not yet set
+          remoteIceQueueRef.current.push(payload.candidate);
+        } else {
+          pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch((addErr) => {
+            console.warn("addIceCandidate error on sender:", addErr);
+          });
+        }
+      } else {
+        console.log("Sender got unknown signal type:", payload.type);
+      }
+    };
+
+    socket.on("signal", handleSignal);
+
+    // create offer and send
+    (async () => {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("signal", { type: "offer", sdp: pc.localDescription?.sdp });
+      } catch (err) {
+        console.error("Failed to create/send offer:", err);
+      }
+    })();
+
+    return () => {
+      socket.off("signal", handleSignal);
+      try {
+        dcRef.current?.close();
+        pcRef.current?.close();
+      } catch (cleanupErr) {
+        console.warn("RTC cleanup error:", cleanupErr);
+      } finally {
+        dcRef.current = null;
+        pcRef.current = null;
+      }
+    };
+  }, [socket]);
+
+  // -------------------------
+  // File send logic
+  // -------------------------
+  // called when user presses SEND button - sends files in sequence
+  const sendAllFiles = async () => {
+    if (!dcRef.current || dcRef.current.readyState !== "open") {
+      showError("Connection not ready","Wait for receiver to join and for the connection to open.");
+      return;
+    }
+    for (const file of selectedFiles) {
+      // sequentially wait for each file to finish before starting next
+      // so we don't blow the dataChannel buffer with many files concurrently
+      await sendFile(file);
+    }
+  };
+
+  // Send one file with metadata then chunked binary pieces
+  const sendFile = async (file: File) => {
+    const dc = dcRef.current!;
+    // file metadata
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const fileId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const fileOffer = {
+      type: "file-offer",
+      id: fileId,
+      name: file.name,
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+      chunkSize: CHUNK_SIZE,
+      totalChunks
+    };
+    // send control
+    dc.send(JSON.stringify(fileOffer));
+
+    // stream file as chunks using ReadableStream/stream reader (good for big files)
+    const reader = file.stream().getReader();
+    let chunkIndex = 0;
+
+    const pump = async (): Promise<void> => {
+      const result = await reader.read();
+      const { done, value } = result;
+      if (done) {
+        // signal end of file
+        dc.send(JSON.stringify({ type: "file-end", id: fileId }));
+        console.log("Completed sending file:", file.name);
+        return;
+      }
+
+      // value may be a Uint8Array chunk; keep it const because we don't reassign
+      const buffer = value as Uint8Array;
+      let offset = 0;
+      while (offset < buffer.length) {
+        const slice = buffer.slice(offset, offset + CHUNK_SIZE);
+        // prefix header (small json) + \n + binary
+        const header = JSON.stringify({ type: "chunk", id: fileId, index: chunkIndex });
+        const encoder = new TextEncoder();
+        const headerBytes = encoder.encode(header + "\n");
+        const packet = new Uint8Array(headerBytes.length + slice.length);
+        packet.set(headerBytes, 0);
+        packet.set(slice, headerBytes.length);
+
+        // backpressure: pause if bufferedAmount too large
+        if (dc.bufferedAmount > BUFFERED_THRESHOLD) {
+          // ensure threshold is set (some browsers might throw if set repeatedly)
+          try {
+            // smaller threshold to resume earlier
+            dc.bufferedAmountLowThreshold = Math.floor(BUFFERED_THRESHOLD / 2);
+          } catch (err) {
+            // not fatal, just log
+            console.warn("Could not set bufferedAmountLowThreshold:", err);
+          }
+          await new Promise<void>((resolve) => {
+            const onLow = () => {
+              try { dc.removeEventListener("bufferedamountlow", onLow); } catch (e) { console.log(e) }
+              resolve();
+            };
+            dc.addEventListener("bufferedamountlow", onLow);
+          });
+        }
+
+        try {
+          dc.send(packet.buffer);
+        } catch (sendErr) {
+          console.error("DataChannel send error:", sendErr);
+          return;
+        }
+
+        chunkIndex++;
+        offset += slice.length;
+      }
+
+      // continue reading
+      return pump();
+    };
+
+    await pump();
+  };
+
+  // --- UI helpers kept as-is from your original code ---
+  const handleOpenFileDialog = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setSelectedFiles((prev) => [...prev, ...newFiles]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const newFiles = Array.from(e.dataTransfer.files);
+      setSelectedFiles((prev) => [...prev, ...newFiles]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + " B";
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    else return (bytes / 1048576).toFixed(1) + " MB";
+  };
+
+  // --- UI (kept intact, only wired SEND button to sendAllFiles) ---
+  return (
+    <div className="sender-container">
+      <div
+        className={twMerge([
+          "relative size-100 flex items-center justify-center",
+          "[--color-frame-1-stroke:var(--color-primary)]/50",
+          "[--color-frame-1-fill:var(--color-primary)]/20",
+          "[--color-frame-2-stroke:var(--color-accent)]",
+          "[--color-frame-2-fill:var(--color-accent)]/20",
+          "[--color-frame-3-stroke:var(--color-accent)]",
+          "[--color-frame-3-fill:var(--color-accent)]/20",
+          "[--color-frame-4-stroke:var(--color-accent)]",
+          "[--color-frame-4-fill:var(--color-accent)]/20",
+          "[--color-frame-5-stroke:var(--color-primary)]/23",
+          "[--color-frame-5-fill:transparent]",
+          "frame-container"
+        ])}
+      >
+        <Frame
+          className="drop-shadow-2xl drop-shadow-primary/50"
+          paths={JSON.parse(
+            '[{"show":true,"style":{"strokeWidth":"1","stroke":"var(--color-frame-1-stroke)","fill":"var(--color-frame-1-fill)"},"path":[["M","37","12"],["L","0% + 59","12"],["L","0% + 85","0% + 33"],["L","79","0% + 12"],["L","50% - 3","12"],["L","50% + 16","30"],["L","100% - 35","30"],["L","100% - 16","47"],["L","100% - 16","100% - 47.05882352941177%"],["L","100% - 8","100% - 44.85294117647059%"],["L","100% - 9","100% - 16.666666666666668%"],["L","100% - 17","100% - 14.705882352941176%"],["L","100% - 17","100% - 30"],["L","100% - 34","100% - 12"],["L","50% + 13","100% - 12"],["L","50% + 15","100% - 26"],["L","50% - 11","100% - 12"],["L","37","100% - 12"],["L","19","100% - 30"],["L","19","0% + 50.490196078431374%"],["L","10","0% + 48.529411764705884%"],["L","10","0% + 20.098039215686274%"],["L","0% + 19.000000000000004","0% + 18.38235294117647%"],["L","19","29"],["L","37","12"]]},{"show":true,"style":{"strokeWidth":"1","stroke":"var(--color-frame-2-stroke)","fill":"var(--color-frame-2-fill)"},"path":[["M","50% + 10","15"],["L","50% + 19","15"],["L","50% + 24","0% + 20"],["L","50% + 16","0% + 20"],["L","50% + 10","15"]]},{"show":true,"style":{"strokeWidth":"1","stroke":"var(--color-frame-3-stroke)","fill":"var(--color-frame-3-fill)"},"path":[["M","50% + 25","15"],["L","50% + 34","15"],["L","50% + 40","0% + 21"],["L","50% + 31","0% + 21"],["L","50% + 25","15"]]},{"show":true,"style":{"strokeWidth":"1","stroke":"var(--color-frame-4-stroke)","fill":"var(--color-frame-4-fill)"},"path":[["M","50% + 40","15"],["L","50% + 52","15"],["L","50% + 61","0% + 23"],["L","50% + 49","0% + 23"],["L","50% + 40","15"]]},{"show":true,"style":{"strokeWidth":"1","stroke":"var(--color-frame-5-stroke)","fill":"var(--color-frame-5-fill)"},"path":[["M","36","3"],["L","0% + 58","0"],["L","0% + 84","0% + 40"],["L","81","0% + 0"],["L","50% - 1","4"],["L","50% + 5","6"],["L","50% + 54","7"],["L","50% + 74","23"],["L","100% - 32","21"],["L","100% - 8","42"],["L","100% - 9","100% - 52.450980392156865%"],["L","100% + 0","100% - 50.245098039215684%"],["L","100% + 0","100% - 15.196078431372548%"],["L","100% - 7","100% - 13.480392156862745%"],["L","100% - 7","100% - 27"],["L","100% - 29","100% - 3"],["L","50% + 14","100% + 0"],["L","50% + 21","100% - 31"],["L","50% - 13","100% + 0"],["L","37","100% - 4"],["L","11","100% - 28"],["L","10","0% + 55.3921568627451%"],["L","0","0% + 52.94117658823523%"],["L","1","0% + 18.627450980392158%"],["L","11","0% + 16.666666666666668%"],["L","11","25"],["L","36","3"]]}]'
+          )} 
+        /> 
+        {/* Sender Interface Content */} 
+        <div className="absolute inset-0 flex flex-col items-center justify-center pt-6 z-10 p-3 overflow-hidden">
+          {/* File Upload Area */}
+          <div
+            className={twMerge(
+              "w-64 h-40 flex items-center justify-center rounded-xl border-2 border-dashed p-4 text-center transition-all duration-300 mb-3",
+              isDragging
+                ? "border-accent"
+                : "border-primary/30",
+            )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div className="flex flex-col items-center justify-center space-y-2">
+              <FiUpload className="text-2xl text-accent mx-auto" />
+              <p className="text-gray-300 text-sm font-medium mb-2">
+                  DRAG & DROP FILES
+              </p>
+              
+              <Button
+                variant="accent"
+                className="px-4 py-1.5 text-sm font-medium"
+                onClick={handleOpenFileDialog}
+              >
+                <FiFile className="mr-1" />
+                SELECT
+              </Button>
+              
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                multiple
+                className="hidden"
+              />
+              <p className="text-gray-300 text-sm font-medium mb-2 m-2">
+                  SUPPORTED FORMATS: ALL
+              </p>
+            </div>
+          </div>
+
+          {/* Selected Files List */}
+          {selectedFiles.length > 0 && (
+            <div className="w-full max-w-xs rounded-xl p-3 bg-gray-900/30">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-sm font-semibold text-white">SELECTED FILES</h2>
+                <span className="text-accent font-mono text-xs">
+                  {selectedFiles.length} ITEM{selectedFiles.length !== 1 ? "S" : ""}
+                </span>
+              </div>
+              
+              <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                {selectedFiles.map((file, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-1.5 rounded border border-gray-700 hover:border-accent/30 transition-colors"
+                  >
+                    <div className="flex items-center truncate w-10/12">
+                      <FiFile className="text-accent mr-1.5 min-w-[14px] text-sm" />
+                      <div className="truncate text-left">
+                        <p className="text-white truncate text-xs">{file.name}</p>
+                        <p className="text-2xs text-gray-400">
+                          {formatFileSize(file.size)}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={() => removeFile(index)}
+                      className="text-red-400 hover:text-red-300 transition-colors p-1"
+                    >
+                      <FiTrash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="flex justify-end space-x-2 mt-2">
+                <Button
+                  variant="accent"
+                  className="px-3 py-0.5 text-xs font-medium"
+                  onClick={() => setSelectedFiles([])}
+                >
+                  CLEAR
+                </Button>
+                
+                <Button
+                  variant="default"
+                  className="px-3 py-0.5 text-xs font-medium"
+                  disabled={selectedFiles.length === 0 || !dataChannelOpen}
+                  onClick={() => sendAllFiles()}
+                >
+                  {dataChannelOpen ? "SEND" : "WAITING FOR RECEIVER"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

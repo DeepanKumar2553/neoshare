@@ -1,0 +1,251 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
+
+.App{
+  height: 100vh;
+  width: 100vw;
+}
+
+.home-container{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* .frame-container{
+  display: inline-block;
+  justify-content: center;
+  align-items:center;
+} */
+
+.futuristic-title {
+  display: inline-block;
+  transform: scale(0.5);
+  font-family: 'Orbitron', 'Arial Narrow', sans-serif;
+  font-size: 5rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #0ff;
+  text-shadow:
+    0 0 10px #0ff,
+    0 0 20px #0ff,
+    0 0 30px #0ff,
+    0 0 40px #0af,
+    0 0 70px #0af,
+    0 0 80px #0af,
+    0 0 100px #0af,
+    0 0 150px #0af;
+  letter-spacing: 5px;
+  position: relative;
+  animation: flicker 1.5s infinite alternate;
+  white-space: nowrap;
+}
+
+.futuristic-title::before {
+  font-family: 'Orbitron', 'Share Tech Mono', 'Audiowide', 'sans-serif';
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 40%;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, #0ff, transparent);
+  animation: scanline 3s linear infinite;
+  margin-top: 10px;
+
+  mask-image: linear-gradient(to right, transparent, white 20%, white 80%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, white 20%, white 80%, transparent);
+}
+
+.futuristic-title::after {
+  content: 'SYSTEM ONLINE';
+  position: absolute;
+  top: 100%;
+  margin-top: 25px;
+  right: 0;
+  font-size: 1rem;
+  color: #0f0;
+  text-shadow: 0 0 5px #0f0;
+  opacity: 0.8;
+}
+
+@keyframes flicker {
+
+  0%,
+  19%,
+  21%,
+  23%,
+  25%,
+  54%,
+  56%,
+  100% {
+    text-shadow:
+      0 0 10px #0ff,
+      0 0 20px #0ff,
+      0 0 30px #0ff,
+      0 0 40px #0af,
+      0 0 70px #0af,
+      0 0 80px #0af,
+      0 0 100px #0af,
+      0 0 150px #0af;
+  }
+
+  20%,
+  24%,
+  55% {
+    text-shadow: none;
+    color: #000;
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateX(-45%) scaleX(0%);
+    opacity: 0;
+  }
+
+  10% {
+    transform: translateX(-15%) scaleX(1);
+    opacity: 1;
+  }
+
+  85% {
+    transform: translateX(160%) scaleX(1);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateX(190%) scaleX(0);
+    opacity: 0;
+  }
+}
+
+.neon-glow {
+  text-shadow:
+    0 0 5px var(--color-primary),
+    0 0 10px var(--color-primary),
+    0 0 20px var(--color-accent),
+    0 0 30px var(--color-accent);
+}
+
+.btn{
+  margin: 15px;
+  font-size: 1rem;
+}
+
+.neoshare-title {
+  transform: scale(0.48);
+  position: fixed;
+  top: 0;
+  left: -100px;
+}
+
+.generate-container{
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items:center;
+}
+
+.text-area{
+  height: 5.5vh;
+}
+
+.generate-items{
+  display: inline;
+  justify-content: center;
+  align-items:center;
+}
+
+.generate-item{
+  display: flex;
+  margin: 20px;
+  font-size: 0.78rem;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+@keyframes fade {
+
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.text-area{
+  display: flex;
+  justify-content: center;
+  align-items:center;
+  font-size: 1rem;
+}
+
+.wifi-symbol{
+  margin-left: -5px !important;
+}
+
+.sender-container,
+.receiver-container{
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items:center;
+}
+
+@keyframes marquee {
+  0% {
+    background-position: 0 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-\[marquee_6s_linear_infinite\] {
+  background-size: 200% 100%;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4B5563 #1F2937;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #1F2937;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+}
