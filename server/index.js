@@ -183,5 +183,5 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 8080;
 
 httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log("Socket.io signaling server running on ws://localhost:8080");
+    console.log(`Socket.io signaling server running on ${PORT}`);
 });
