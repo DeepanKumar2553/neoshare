@@ -3,7 +3,11 @@ import { createServer } from "http";
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-    cors: { origin: "https://neoshare.pages.dev" },
+    cors: {
+        origin: "https://neoshare.pages.dev",
+        methods: ["GET", "POST"],
+        credentials: true
+    }
 });
 
 const rooms = new Map();
