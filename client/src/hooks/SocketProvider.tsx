@@ -32,14 +32,13 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
 
     setSocket(newSocket);
 
-    // Cleanup function
     return () => {
       if (newSocket.connected) {
         newSocket.disconnect();
         console.log('Socket disconnected');
       }
     };
-  }, [shouldReconnect]); // Reconnect when shouldReconnect changes
+  }, [shouldReconnect]);
 
   return (
     <SocketContext.Provider value={{ socket, isConnecting }}>

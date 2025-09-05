@@ -2,8 +2,8 @@ import { Frame } from "@/ui/frame"
 import { twMerge } from "tailwind-merge"
 import { Button } from '@/ui/button'
 import '../App.css'
-import {WifiConnectionUI} from "@/ui/WifiConnectionUI"
-import { useEffect,  useState } from "react"
+import { WifiConnectionUI } from "@/ui/WifiConnectionUI"
+import { useEffect, useState } from "react"
 import { Input } from "@/ui/input";
 import { useNavigate } from "react-router-dom"
 import { useSocket } from '../hooks/useSocket'
@@ -12,16 +12,14 @@ import { grantReceiverAccess } from "@/store/accessSlice"
 import { useDispatch } from "react-redux"
 
 const EnterCode = () => {
-    
+
     const [isWaiting, setIsWaiting] = useState(false);
     const [codeInput, setCodeInput] = useState("");
     const [error, setError] = useState("");
     const navigate = useNavigate();
     const dispatch = useDispatch();
-    
-    // Use the shared socket from context
+
     const { socket } = useSocket();
-  
 
     useEffect(() => {
         if (!socket) return;
@@ -29,11 +27,11 @@ const EnterCode = () => {
         const handleJoined = (data: { title: string, description?: string }) => {
             dispatch(grantReceiverAccess());
             navigate("/receiver-page");
-            showError(data.title,data.description)
+            showError(data.title, data.description)
         };
 
-        const handleError = (data:{title:string,description?:string}) => {
-            showError(data.title,data.description)
+        const handleError = (data: { title: string, description?: string }) => {
+            showError(data.title, data.description)
             setIsWaiting(false);
         };
 
@@ -44,9 +42,7 @@ const EnterCode = () => {
             setIsWaiting(false);
         };
 
-  socket.on("room-destroyed", handleRoomDestroyed);
-
-        // Cleanup listeners (but not the socket connection)
+        socket.on("room-destroyed", handleRoomDestroyed);
         return () => {
             socket.off("joined", handleJoined);
             socket.off("error", handleError);
@@ -56,7 +52,7 @@ const EnterCode = () => {
 
     const handleJoin = () => {
         if (isWaiting || !codeInput || !socket) return;
-        
+
         setIsWaiting(true);
         setError("");
         socket.emit("join", codeInput.trim());
@@ -118,7 +114,7 @@ const EnterCode = () => {
                                             <span
                                                 key={i}
                                                 className="inline-block w-1.5 h-1.5 bg-current rounded-full"
-                                                style={{ 
+                                                style={{
                                                     animation: `pulse 1.5s infinite ${i * 0.3}s`
                                                 }}
                                             />

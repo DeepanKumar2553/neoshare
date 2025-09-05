@@ -1,4 +1,3 @@
-// signaling-server.js (patched)
 import { Server } from "socket.io";
 import { createServer } from "http";
 
@@ -7,14 +6,13 @@ const io = new Server(httpServer, {
     cors: { origin: "https://neoshare.pages.dev" },
 });
 
-// Store room details: roomCode -> { sender, receiver, timeout, pendingSignals, createdAt, state }
 const rooms = new Map();
 
 function generateCode() {
     let code;
     let attempts = 0;
     do {
-        code = Math.floor(10000000 + Math.random() * 90000000).toString(); // guaranteed 8-digit
+        code = Math.floor(10000000 + Math.random() * 90000000).toString();
         attempts++;
         if (attempts > 10) throw new Error("Failed to generate unique code");
     } while (rooms.has(code));
@@ -24,7 +22,6 @@ function generateCode() {
 function clearRoom(roomCode) {
     const room = rooms.get(roomCode);
     if (!room) return;
-    // notify peers
     const payload = {
         title: "Connection Error",
         description: "Room Destroyed"
@@ -32,14 +29,12 @@ function clearRoom(roomCode) {
     if (room.sender && room.sender.connected) room.sender.emit("room-destroyed", payload);
     if (room.receiver && room.receiver.connected) room.receiver.emit("room-destroyed", payload);
 
-    // avoid force disconnect to let clients cleanup gracefully
     if (room.timeout) clearTimeout(room.timeout);
     rooms.delete(roomCode);
     console.log(`Room ${roomCode} destroyed.`);
 }
 
 io.on("connection", (socket) => {
-    // Use socket.data for per-socket storage (do not overwrite socket.id)
     socket.data.role = null;
     socket.data.roomCode = null;
 
@@ -54,7 +49,7 @@ io.on("connection", (socket) => {
             rooms.set(code, {
                 sender: socket,
                 receiver: null,
-                pendingSignals: [], // queue signals until peer present
+                pendingSignals: [],
                 timeout,
                 createdAt: Date.now(),
                 state: "waiting"
@@ -86,7 +81,6 @@ io.on("connection", (socket) => {
             return;
         }
 
-        // Clear the timeout now that both peers are connected
         if (room.timeout) {
             clearTimeout(room.timeout);
             delete room.timeout;
@@ -97,10 +91,8 @@ io.on("connection", (socket) => {
         socket.data.role = "receiver";
         socket.data.roomCode = code;
 
-        // flush pending signals (in order)
         if (room.pendingSignals && room.pendingSignals.length > 0) {
             for (const item of room.pendingSignals) {
-                // send to proper target
                 if (item.target === "sender" && room.sender && room.sender.connected) {
                     room.sender.emit("signal", item.data);
                 } else if (item.target === "receiver" && room.receiver && room.receiver.connected) {
@@ -110,7 +102,6 @@ io.on("connection", (socket) => {
             room.pendingSignals = [];
         }
 
-        // Notify both peers
         if (room.sender && room.sender.connected) {
             room.sender.emit("peer-joined", {
                 title: "Receiver Connected",
@@ -143,7 +134,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    // WebRTC signaling - single handler, but validate and queue if target missing
     socket.on("signal", (payload) => {
         try {
             const roomCode = socket.data.roomCode;
@@ -151,14 +141,11 @@ io.on("connection", (socket) => {
             const room = rooms.get(roomCode);
             if (!room) return;
 
-            // Basic validation of payload shape
             if (!payload || typeof payload !== "object" || !payload.type) return;
 
-            // target direction: if sender sent it, it should go to receiver and vice versa
             const fromRole = socket.data.role;
             const targetRole = fromRole === "sender" ? "receiver" : "sender";
 
-            // Limit payload sizes (very rough)
             if (payload.type === "offer" || payload.type === "answer") {
                 if (!payload.sdp || payload.sdp.length > 200 * 1024) return; // too big
             } else if (payload.type === "ice") {
@@ -170,7 +157,6 @@ io.on("connection", (socket) => {
             if (targetSocket && targetSocket.connected) {
                 targetSocket.emit("signal", payload);
             } else {
-                // queue until target arrives
                 room.pendingSignals = room.pendingSignals || [];
                 room.pendingSignals.push({ target: targetRole, data: payload });
             }

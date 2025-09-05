@@ -2,7 +2,6 @@ import { configureStore } from '@reduxjs/toolkit';
 import socketReducer from './socketSlice';
 import accessReducer from './accessSlice';
 
-// Create the root store
 export const store = configureStore({
     reducer: {
         socket: socketReducer,

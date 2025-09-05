@@ -1,4 +1,3 @@
-// store/accessSlice.ts
 import { createSlice } from '@reduxjs/toolkit';
 
 interface AccessState {

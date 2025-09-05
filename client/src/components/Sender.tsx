@@ -125,7 +125,6 @@ export default function Sender() {
   function handleSendRequest() {
     setUiState("sending");
     if (channelRef.current && channelRef.current.readyState === "open") {
-      // Queue files for transfer
       fileQueueRef.current = [...selectedFiles];
       isSendingRef.current = true;
 
@@ -163,7 +162,6 @@ export default function Sender() {
 
         await sendFileChunks(file, fileId);
 
-        // Small delay between files
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
@@ -171,7 +169,6 @@ export default function Sender() {
       setTransferStatus("Transfer complete");
       setTransferProgress(100);
 
-      // Reset after a delay
       setTimeout(() => {
         setTransferStatus("idle");
         setUiState("idle")
@@ -189,7 +186,6 @@ export default function Sender() {
       }
 
       try {
-        // Send file metadata
         const metadata = {
           type: "FILE_META",
           fileId,
@@ -210,11 +206,10 @@ export default function Sender() {
             throw new Error("Data channel closed during transfer");
           }
 
-          // Backpressure control: wait if buffer is too full
           if (channelRef.current.bufferedAmount > MAX_BUFFER) {
             await new Promise<void>((resolve) => {
               channelRef.current!.onbufferedamountlow = () => {
-                channelRef.current!.onbufferedamountlow = null; // clear handler
+                channelRef.current!.onbufferedamountlow = null;
                 resolve();
               };
             });
@@ -225,12 +220,10 @@ export default function Sender() {
 
           offset += buffer.byteLength;
 
-          // Progress update
           const progress = Math.round((offset / file.size) * 100);
           setTransferProgress(progress);
         }
 
-        // Send end marker
         const endData = { type: "FILE_END", fileId, success: true };
         channelRef.current.send(JSON.stringify(endData));
       } catch (error) {
@@ -244,7 +237,6 @@ export default function Sender() {
     };
 
     async function setupWebRTC() {
-      // 1. Create peer connection
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
@@ -256,7 +248,6 @@ export default function Sender() {
       });
       pcRef.current = pc;
 
-      // 2. Create data channel
       const channel = pc.createDataChannel("fileChannel");
       channelRef.current = channel;
 
@@ -287,21 +278,18 @@ export default function Sender() {
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           if (isAnswerReceived.current && socket) {
-            // Send immediately if answer received
             console.log("Sending ICE candidate to receiver");
             socket.emit("signal", {
               type: "ice",
               candidate: event.candidate
             });
           } else {
-            // Queue if answer not received yet
             console.log("Queuing ICE candidate (answer not received)");
             pendingIceCandidates.current.push(event.candidate);
           }
         }
       };
 
-      // 3. Create and send offer
       try {
         if (!socket) return;
 
@@ -317,7 +305,6 @@ export default function Sender() {
         console.error("Error creating offer:", error);
       }
 
-      // 4. Handle incoming answer
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const answerHandler = async (message: any) => {
         if (message.type === "answer") {
@@ -343,7 +330,6 @@ export default function Sender() {
           }
 
           if (!socket) return;
-          // Remove answer handler after processing
           socket.off("signal", answerHandler);
         }
       };
@@ -352,7 +338,6 @@ export default function Sender() {
 
       socket.on("signal", answerHandler);
 
-      // 6. Handle incoming ICE candidates (for receiver's candidates)
       socket.on("signal", async (message) => {
         if (message.type === "ice") {
           console.log("Received ICE candidate from receiver");
@@ -370,7 +355,6 @@ export default function Sender() {
     setupWebRTC();
 
     return () => {
-      // Cleanup WebRTC
       if (channelRef.current) channelRef.current.close();
       if (pcRef.current) pcRef.current.close();
       isAnswerReceived.current = false;

@@ -19,14 +19,11 @@ const GenerateCode = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
-
-  // Use the shared socket from context
   const { socket, isConnecting } = useSocket();
 
   useEffect(() => {
     if (!socket) return;
 
-    // Handle server events
     const handleCode = (code: string) => {
       setTextToDisplay(code);
       setIsWaiting(true);
@@ -34,7 +31,7 @@ const GenerateCode = () => {
 
     const handlePeerJoined = (data: { title: string, description?: string }) => {
       dispatch(grantSenderAccess());
-      navigate("/sender-page"); // Navigate to sender page
+      navigate("/sender-page");
       showError(data.title, data.description)
     };
 
@@ -48,7 +45,6 @@ const GenerateCode = () => {
     };
 
     socket.on("room-destroyed", handleRoomDestroyed);
-    // Cleanup listeners (but not the socket connection)
     return () => {
       socket.off("code", handleCode);
       socket.off("peer-joined", handlePeerJoined);
