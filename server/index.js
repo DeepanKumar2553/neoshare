@@ -180,6 +180,8 @@ io.on("connection", (socket) => {
     });
 });
 
-httpServer.listen(8080, () => {
+const PORT = process.env.PORT || 8080;
+
+httpServer.listen(PORT, "0.0.0.0", () => {
     console.log("Socket.io signaling server running on ws://localhost:8080");
 });
