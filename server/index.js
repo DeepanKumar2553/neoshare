@@ -5,7 +5,6 @@ const httpServer = createServer();
 const io = new Server(httpServer, {
     cors: {
         origin: "https://neoshare.pages.dev",
-        methods: ["GET", "POST"],
         credentials: true
     }
 });
