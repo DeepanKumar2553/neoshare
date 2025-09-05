@@ -15,24 +15,24 @@ function App() {
   return (
     <Provider store={store}>
       <SocketProvider>
-      <div className="App">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/generate" element={<GeneratePage />} />
-          <Route path="/enter" element={<EnterPage />} />
-          <Route path="/sender-page" element={
+        <div className="App">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/generate" element={<GeneratePage />} />
+            <Route path="/enter" element={<EnterPage />} />
+            <Route path="/sender-page" element={
               <PrivateRoute requiredAccess="sender">
                 <SenderPage />
               </PrivateRoute>
             } />
-            
+
             <Route path="/receiver-page" element={
               <PrivateRoute requiredAccess="receiver">
                 <ReceiverPage />
               </PrivateRoute>
             } />
-        </Routes>
-      </div>
+          </Routes>
+        </div>
       </SocketProvider>
       <ToastUI />
     </Provider>
