@@ -4,7 +4,7 @@ import { createServer } from "http";
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-    cors: { origin: "https://neoshare.pages.dev/" },
+    cors: { origin: "https://neoshare.pages.dev" },
 });
 
 // Store room details: roomCode -> { sender, receiver, timeout, pendingSignals, createdAt, state }
