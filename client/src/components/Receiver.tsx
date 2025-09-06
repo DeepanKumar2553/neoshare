@@ -512,10 +512,10 @@ export default function Receiver() {
             !isRTCConnected ? (
               <>
                 <div className="flex flex-col items-center mb-8">
-                  <div className="w-16 h-16 rounded-full flex items-center justify-center mb-2 bg-red-500/20 border border-red-500 animate-pulse">
-                    <FiWifi className="text-3xl text-red-500" />
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center mb-2 bg-yellow-500/20 border border-yellow-500 animate-pulse">
+                    <FiWifi className="text-3xl text-yellow-500" />
                   </div>
-                  <p className="text-red-500 font-medium">Awaiting Secure Connection....</p>
+                  <p className="text-yellow-500 font-medium">Awaiting Secure Connection....</p>
                 </div>
                 <div className="text-center text-xs text-gray-400">
                   <p>Awaiting connection established</p>
