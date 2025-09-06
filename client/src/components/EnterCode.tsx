@@ -3,7 +3,7 @@ import { twMerge } from "tailwind-merge"
 import { Button } from '@/ui/button'
 import '../App.css'
 import { WifiConnectionUI } from "@/ui/WifiConnectionUI"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Input } from "@/ui/input";
 import { useNavigate } from "react-router-dom"
 import { useSocket } from '../hooks/useSocket'
@@ -50,13 +50,24 @@ const EnterCode = () => {
         };
     }, [socket, navigate, dispatch]);
 
-    const handleJoin = () => {
+    const handleJoin = useCallback(() => {
         if (isWaiting || !codeInput || !socket) return;
 
         setIsWaiting(true);
         setError("");
         socket.emit("join", codeInput.trim());
-    };
+    }, [codeInput, isWaiting, socket]);
+
+    useEffect(() => {
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Enter' && !isWaiting) {
+                handleJoin();
+            }
+        };
+
+        document.addEventListener('keydown', handleGlobalKeyDown);
+        return () => document.removeEventListener('keydown', handleGlobalKeyDown);
+    }, [isWaiting, handleJoin]);
 
     return (
         <div className="generate-container">
