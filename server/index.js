@@ -4,7 +4,7 @@ import { createServer } from "http";
 const httpServer = createServer();
 const io = new Server(httpServer, {
     cors: {
-        origin: "https://neoshare.pages.dev",
+        origin: ["https://neoshare.pages.dev", "http://localhost:5173/"],
         credentials: true
     }
 });
