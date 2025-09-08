@@ -39,7 +39,7 @@ export default function Sender() {
   const [isRTCConnected, setIsRTCConnected] = useState(false);
   const [uiState, setUiState] = useState<"idle" | "sending" | "">("idle");
 
-  const MAX_BUFFER = 2 * 1024 * 1024; // 2MB safety threshold
+  const MAX_BUFFER = 1 * 1024 * 1024; // 2MB safety threshold
 
   const [uploadSpeed, setUploadSpeed] = useState(0);
   const [uploadSpeedUnit, setUploadSpeedUnit] = useState("KB/s");
@@ -206,14 +206,25 @@ export default function Sender() {
             throw new Error("Data channel closed during transfer");
           }
 
-          if (channelRef.current.bufferedAmount > MAX_BUFFER) {
+          // if (channelRef.current.bufferedAmount > MAX_BUFFER) {
+          //   await new Promise<void>((resolve) => {
+          //     channelRef.current!.onbufferedamountlow = () => {
+          //       channelRef.current!.onbufferedamountlow = null;
+          //       resolve();
+          //     };
+          //   });
+          // }
+
+          if (channelRef.current!.bufferedAmount > MAX_BUFFER) {
             await new Promise<void>((resolve) => {
-              channelRef.current!.onbufferedamountlow = () => {
-                channelRef.current!.onbufferedamountlow = null;
+              const handler = () => {
+                channelRef.current!.removeEventListener("bufferedamountlow", handler);
                 resolve();
               };
+              channelRef.current!.addEventListener("bufferedamountlow", handler);
             });
           }
+          channelRef.current!.send(chunk);
 
           channelRef.current.send(buffer);
           bytesSentRef.current += buffer.byteLength;
