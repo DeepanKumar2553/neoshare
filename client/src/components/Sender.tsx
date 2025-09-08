@@ -206,25 +206,14 @@ export default function Sender() {
             throw new Error("Data channel closed during transfer");
           }
 
-          // if (channelRef.current.bufferedAmount > MAX_BUFFER) {
-          //   await new Promise<void>((resolve) => {
-          //     channelRef.current!.onbufferedamountlow = () => {
-          //       channelRef.current!.onbufferedamountlow = null;
-          //       resolve();
-          //     };
-          //   });
-          // }
-
-          if (channelRef.current!.bufferedAmount > MAX_BUFFER) {
+          if (channelRef.current.bufferedAmount > MAX_BUFFER) {
             await new Promise<void>((resolve) => {
-              const handler = () => {
-                channelRef.current!.removeEventListener("bufferedamountlow", handler);
+              channelRef.current!.onbufferedamountlow = () => {
+                channelRef.current!.onbufferedamountlow = null;
                 resolve();
               };
-              channelRef.current!.addEventListener("bufferedamountlow", handler);
             });
           }
-          channelRef.current!.send(chunk);
 
           channelRef.current.send(buffer);
           bytesSentRef.current += buffer.byteLength;
