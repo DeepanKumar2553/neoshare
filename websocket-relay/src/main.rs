@@ -10,6 +10,21 @@ use tokio::sync::Mutex;
 use url::Url;
 
 
+async fn is_http_request(stream: &TcpStream) -> Result<bool, std::io::Error> {
+    let mut buffer = [0u8; 16];
+    stream.peek(&mut buffer).await?;
+    let request = String::from_utf8_lossy(&buffer);
+    Ok(request.starts_with("GET /") || request.starts_with("POST /") || request.starts_with("HEAD /"))
+}
+
+async fn handle_http_health_check(mut stream: TcpStream) -> Result<(), std::io::Error> {
+    use tokio::io::AsyncWriteExt;
+    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK";
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 
 struct Room {
     room_code: String,
@@ -57,6 +72,11 @@ async fn main() {
                         eprintln!("Error handling connection: {}", e);
                     }
                 });
+
+                if let Ok(true) = is_http_request(&stream).await {
+                        let _ = handle_http_health_check(stream).await;
+                        return;
+                    }
             }
             Err(e) => {
                 eprintln!("Failed to accept connection: {}", e);
