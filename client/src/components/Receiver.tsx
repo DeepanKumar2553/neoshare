@@ -310,7 +310,7 @@ export default function Receiver() {
                 channelRef.current = null;
             }
 
-            const ws = new WebSocket(`https://v84mq4h9-8080.inc1.devtunnels.ms/relay?room=${roomCodeRef.current}&role=receiver`);
+            const ws = new WebSocket(`https://websocket-relay.onrender.com/relay?room=${roomCodeRef.current}&role=receiver`);
 
             ws.binaryType = "arraybuffer";
 

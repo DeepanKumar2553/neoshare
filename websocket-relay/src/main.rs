@@ -94,9 +94,17 @@ async fn handle_connection(
         Ok(response)
     };
     
-    let ws_stream = accept_hdr_async(stream, callback)
-        .await
-        .expect("Failed to accept WebSocket");
+    // let ws_stream = accept_hdr_async(stream, callback)
+    //     .await
+    //     .expect("Failed to accept WebSocket");
+
+    let ws_stream = match accept_hdr_async(stream, callback).await {
+        Ok(ws) => ws,
+        Err(e) => {
+              println!("Failed to accept WebSocket connection from {}: {:?}", addr, e);
+               return Ok(()); 
+             }
+            };
     
     if room_code.is_empty() || role.is_empty() {
         println!("Missing room or role in URL");
@@ -149,8 +157,6 @@ async fn handle_connection(
         wait_for_peer(read, rooms.clone(), room_code.clone(), role.clone()).await?;
     }
     
-    println!("Connection closed from {}", addr);
-    
     let mut rooms_map = rooms.lock().await;
     if let Some(room) = rooms_map.get_mut(&room_code) {
         if role == "sender" {
@@ -176,8 +182,6 @@ async fn wait_for_peer(
     room_code: String,
     role: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("{} in room {} waiting for peer (messages will be ignored)...", role, room_code);
- 
     loop {
         let is_complete = {
             let rooms_map = rooms.lock().await;
@@ -236,8 +240,6 @@ async fn relay_messages(
     room_code: String,
     role: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Starting message relay for {} in room {}", role, room_code);
-    
     while let Some(result) = read.next().await {
         match result {
             Ok(msg) => {
