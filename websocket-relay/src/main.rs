@@ -97,7 +97,7 @@ async fn handle_connection(
     // let ws_stream = accept_hdr_async(stream, callback)
     //     .await
     //     .expect("Failed to accept WebSocket");
-
+    
     let ws_stream = match accept_hdr_async(stream, callback).await {
         Ok(ws) => ws,
         Err(e) => {

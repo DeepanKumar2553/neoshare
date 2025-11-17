@@ -324,7 +324,7 @@ export default function Sender() {
         channelRef.current = null;
       }
 
-      const ws = new WebSocket(`https://websocket-relay.onrender.com/relay?room=${roomCodeRef.current}&role=sender`);
+      const ws = new WebSocket(`https://neoshare-relay-server.onrender.com/relay?room=${roomCodeRef.current}&role=sender`);
 
       ws.onopen = () => {
         console.log("Connected to relay server");
