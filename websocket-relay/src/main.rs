@@ -74,9 +74,11 @@ async fn main() {
                 });
 
                 if let Ok(true) = is_http_request(&stream).await {
+                    tokio::spawn(async move {
                         let _ = handle_http_health_check(stream).await;
-                        return;
-                    }
+                    });
+                    continue;
+                }
             }
             Err(e) => {
                 eprintln!("Failed to accept connection: {}", e);
