@@ -10,6 +10,7 @@ import { useSocket } from '../hooks/useSocket'
 import { showError } from "@/hooks/useToast"
 import { useDispatch } from "react-redux"
 import { grantSenderAccess } from "@/store/accessSlice"
+import { setRoomCode, setRole } from "@/store/roomSlice"
 
 const GenerateCode = () => {
   const [isWaiting, setIsWaiting] = useState(false);
@@ -27,6 +28,9 @@ const GenerateCode = () => {
     const handleCode = (code: string) => {
       setTextToDisplay(code);
       setIsWaiting(true);
+
+      dispatch(setRoomCode(code));
+      dispatch(setRole('sender'));
     };
 
     const handlePeerJoined = (data: { title: string, description?: string }) => {

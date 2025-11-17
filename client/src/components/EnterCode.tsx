@@ -10,6 +10,7 @@ import { useSocket } from '../hooks/useSocket'
 import { showError } from "@/hooks/useToast"
 import { grantReceiverAccess } from "@/store/accessSlice"
 import { useDispatch } from "react-redux"
+import { setRoomCode, setRole } from "@/store/roomSlice"
 
 const EnterCode = () => {
 
@@ -26,6 +27,10 @@ const EnterCode = () => {
 
         const handleJoined = (data: { title: string, description?: string }) => {
             dispatch(grantReceiverAccess());
+
+            dispatch(setRoomCode(codeInput.trim()));
+            dispatch(setRole('receiver'));
+
             navigate("/receiver-page");
             showError(data.title, data.description)
         };
@@ -48,7 +53,7 @@ const EnterCode = () => {
             socket.off("error", handleError);
             socket.off("room-destroyed", handleRoomDestroyed);
         };
-    }, [socket, navigate, dispatch]);
+    }, [socket, navigate, dispatch, codeInput]);
 
     const handleJoin = useCallback(() => {
         if (isWaiting || !codeInput || !socket) return;

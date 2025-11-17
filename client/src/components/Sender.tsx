@@ -9,6 +9,8 @@ import { useNavigate } from "react-router-dom";
 import { twMerge } from "tailwind-merge";
 import { FiUpload, FiFile, FiTrash2, FiWifi } from "react-icons/fi";
 import { Button } from "@/ui/button";
+import { useSelector } from 'react-redux';
+import type { RootState } from '@/store/store';
 
 export default function Sender() {
   const dispatch = useAppDispatch();
@@ -45,6 +47,16 @@ export default function Sender() {
   const [uploadSpeedUnit, setUploadSpeedUnit] = useState("KB/s");
   const bytesSentRef = useRef(0);
 
+  const roomCode = useSelector((state: RootState) => state.room.roomCode);
+
+  const relayWsRef = useRef<WebSocket | null>(null);
+
+  const roomCodeRef = useRef<string>("");
+
+  useEffect(() => {
+    roomCodeRef.current = roomCode;
+  }, [roomCode]);
+
   useEffect(() => {
     console.log("Sender page mounted");
 
@@ -75,6 +87,10 @@ export default function Sender() {
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
+      }
+      if (relayWsRef.current) {
+        relayWsRef.current.close();
+        relayWsRef.current = null;
       }
 
       dispatch(triggerReconnect())
@@ -124,25 +140,43 @@ export default function Sender() {
 
   function handleSendRequest() {
     setUiState("sending");
-    if (channelRef.current && channelRef.current.readyState === "open") {
+
+    const message = JSON.stringify({
+      type: "REQUEST_PERMISSION",
+      fileCount: selectedFiles.length
+    });
+
+    if (sendData(message)) {
       fileQueueRef.current = [...selectedFiles];
       isSendingRef.current = true;
-
-      channelRef.current.send(JSON.stringify({
-        type: "REQUEST_PERMISSION",
-        fileCount: selectedFiles.length
-      }));
-
-      setSelectedFilesLength(selectedFiles.length)
-      setSelectedFiles([])
+      setSelectedFilesLength(selectedFiles.length);
+      setSelectedFiles([]);
       console.log("Request sent to receiver for permission");
     } else {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data: any = { title: "Connection Error", description: "DataChannel not ready" };
+      const data: any = { title: "Connection Error", description: "No connection available" };
       showError(data.title, data.description);
       console.log(data.description);
+      setUiState("idle");
     }
   }
+
+  const sendData = (data: string | ArrayBuffer) => {
+    if (relayWsRef.current && relayWsRef.current.readyState === WebSocket.OPEN) {
+      relayWsRef.current.send(data);
+      return true;
+    }
+
+    if (channelRef.current && channelRef.current.readyState === "open") {
+      if (typeof data === 'string') {
+        channelRef.current.send(data);
+      } else {
+        channelRef.current.send(data);
+      }
+      return true;
+    }
+    return false;
+  };
 
   useEffect(() => {
     if (!socket) return;
@@ -180,8 +214,13 @@ export default function Sender() {
     };
 
     const sendFileChunks = async (file: File, fileId: string) => {
-      if (!channelRef.current || channelRef.current.readyState !== "open") {
-        console.error("Channel not ready for sending file chunks");
+
+      const isConnected = () =>
+        (relayWsRef.current && relayWsRef.current.readyState === WebSocket.OPEN) ||
+        (channelRef.current && channelRef.current.readyState === "open");
+
+      if (!isConnected()) {
+        console.error("No connection ready for sending file chunks");
         return;
       }
 
@@ -193,31 +232,38 @@ export default function Sender() {
           size: file.size,
           typed: file.type
         };
-        channelRef.current.send(JSON.stringify(metadata));
+        sendData(JSON.stringify(metadata));
 
         const CHUNK_SIZE = 256 * 1024; // 256KB
         let offset = 0;
 
         while (offset < file.size) {
+          if (!isConnected()) {
+            throw new Error("Connection lost during transfer");
+          }
+
+          if (relayWsRef.current && relayWsRef.current.readyState === WebSocket.OPEN) {
+            while (relayWsRef.current.bufferedAmount > MAX_BUFFER) {
+              await new Promise(resolve => setTimeout(resolve, 50));
+            }
+          }
+          else if (channelRef.current && channelRef.current.readyState === "open") {
+            if (channelRef.current.bufferedAmount > MAX_BUFFER) {
+              await new Promise<void>((resolve) => {
+                channelRef.current!.onbufferedamountlow = () => {
+                  channelRef.current!.onbufferedamountlow = null;
+                  resolve();
+                };
+              });
+            }
+          }
+
           const chunk = file.slice(offset, offset + CHUNK_SIZE);
           const buffer = await chunk.arrayBuffer();
 
-          if (channelRef.current.readyState !== "open") {
-            throw new Error("Data channel closed during transfer");
-          }
+          sendData(buffer);
 
-          if (channelRef.current.bufferedAmount > MAX_BUFFER) {
-            await new Promise<void>((resolve) => {
-              channelRef.current!.onbufferedamountlow = () => {
-                channelRef.current!.onbufferedamountlow = null;
-                resolve();
-              };
-            });
-          }
-
-          channelRef.current.send(buffer);
           bytesSentRef.current += buffer.byteLength;
-
           offset += buffer.byteLength;
 
           const progress = Math.round((offset / file.size) * 100);
@@ -225,15 +271,80 @@ export default function Sender() {
         }
 
         const endData = { type: "FILE_END", fileId, success: true };
-        channelRef.current.send(JSON.stringify(endData));
+        sendData(JSON.stringify(endData));
+
       } catch (error) {
         console.error("Error sending file:", error);
-        if (channelRef.current?.readyState === "open") {
-          channelRef.current.send(
-            JSON.stringify({ type: "FILE_END", fileId, success: false })
-          );
+        if (isConnected()) {
+          sendData(JSON.stringify({ type: "FILE_END", fileId, success: false }));
         }
       }
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleControlMessage = async (event: any) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "PERMISSION_GRANTED") {
+          console.log("Receiver accepted, start sending files...");
+          setUiState("")
+          processFileQueue();
+        }
+
+        if (msg.type === "PERMISSION_DENIED") {
+          console.log("Receiver denied transfer.");
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    const switchToRelay = () => {
+      if (relayWsRef.current?.readyState === WebSocket.OPEN) {
+        console.log("Already connected to relay");
+        return;
+      }
+
+      if (!roomCodeRef.current) {
+        console.error("No room code available");
+        return;
+      }
+
+      console.log("Switching to relay server");
+      console.log("Room code:", roomCodeRef.current);
+
+      if (pcRef.current) {
+        console.log("Closing WebRTC connection");
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (channelRef.current) {
+        channelRef.current.close();
+        channelRef.current = null;
+      }
+
+      const ws = new WebSocket(`https://v84mq4h9-8080.inc1.devtunnels.ms/relay?room=${roomCodeRef.current}&role=sender`);
+
+      ws.onopen = () => {
+        console.log("Connected to relay server");
+        setIsRTCConnected(true);
+      };
+
+      ws.onmessage = (event) => {
+        handleControlMessage(event);
+      };
+
+      ws.onerror = (error) => {
+        console.error("Relay error:", error);
+      };
+
+      ws.onclose = () => {
+        console.log("Relay closed");
+        setIsRTCConnected(false);
+      };
+
+      relayWsRef.current = ws;
     };
 
     async function setupWebRTC() {
@@ -257,23 +368,34 @@ export default function Sender() {
       };
 
       channel.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-
-        if (msg.type === "PERMISSION_GRANTED") {
-          console.log("Receiver accepted, start sending files...");
-          setUiState("")
-          processFileQueue();
-        }
-
-        if (msg.type === "PERMISSION_DENIED") {
-          console.log("Receiver denied transfer.");
-        }
+        handleControlMessage(event);
       };
 
       channel.onclose = () => {
         console.log("DataChannel closed");
         setIsRTCConnected(false);
       };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log("P2P State:", pc.iceConnectionState);
+
+        if (pc.iceConnectionState === 'failed') {
+          console.log("P2P failed - switching to relay");
+          switchToRelay();
+        }
+
+        if (pc.iceConnectionState === 'disconnected') {
+          console.log("P2P disconnected - switching to relay");
+          switchToRelay();
+        }
+      };
+
+      // const timeout = setTimeout(() => {
+      //   if (pc.iceConnectionState !== 'connected') {
+      //     console.log("P2P timeout - switching to relay");
+      //     switchToRelay();
+      //   }
+      // }, 10000);
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -478,7 +600,7 @@ export default function Sender() {
               <div className="text-center text-xs text-gray-400">
                 <p>Awating connection established</p>
                 <p className="mt-1">Data transfer protocol: No Encrypted</p>
-                <p className="mt-1">Peers must match categories</p>
+                {/* <p className="mt-1">Peers must match categories</p> */}
               </div>
             </>) : null
           }
@@ -494,7 +616,7 @@ export default function Sender() {
               <div className="text-center text-xs text-gray-400">
                 <p>Secure connection established</p>
                 <p className="mt-1">Data transfer protocol: No Encrypted</p>
-                <p className="mt-1">Peers must match categories</p>
+                {/* <p className="mt-1">Peers must match categories</p> */}
               </div>
             </div>
           )}

@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from "react";
 import { FiDownload, FiFile, FiWifi } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import { twMerge } from "tailwind-merge";
+import { useSelector } from 'react-redux';
+import type { RootState } from '@/store/store';
 
 export default function Receiver() {
     const dispatch = useAppDispatch();
@@ -28,7 +30,6 @@ export default function Receiver() {
     const [receiveStatus, setReceiveStatus] = useState("Waiting for files...");
     const [uiState, setUiState] = useState(true);
 
-    // Track total files expected and files completed
     const totalFilesExpected = useRef(0);
     const filesCompleted = useRef(0);
 
@@ -38,6 +39,9 @@ export default function Receiver() {
 
     const listRef = useRef<HTMLDivElement | null>(null);
 
+    const roomCode = useSelector((state: RootState) => state.room.roomCode);
+
+    const relayWsRef = useRef<WebSocket | null>(null);
 
     const fileDataRef = useRef<{
         [fileId: string]: {
@@ -47,6 +51,12 @@ export default function Receiver() {
             receivedSize: number
         }
     }>({});
+
+    const roomCodeRef = useRef<string>("");
+
+    useEffect(() => {
+        roomCodeRef.current = roomCode;
+    }, [roomCode]);
 
     useEffect(() => {
         console.log("Receiver page mounted");
@@ -79,24 +89,44 @@ export default function Receiver() {
                 pcRef.current.close();
                 pcRef.current = null;
             }
+            if (relayWsRef.current) {
+                relayWsRef.current.close();
+                relayWsRef.current = null;
+            }
 
             dispatch(triggerReconnect())
             dispatch(revokeReceiverAccess());
         }
     }, [dispatch, socket, navigate]);
 
-    function handleAccept() {
+    const sendData = (data: string) => {
+        if (relayWsRef.current && relayWsRef.current.readyState === WebSocket.OPEN) {
+            relayWsRef.current.send(data);
+            return true;
+        }
         if (channelRef.current && channelRef.current.readyState === "open") {
-            channelRef.current.send(JSON.stringify({ type: "PERMISSION_GRANTED" }));
-            console.log("Accepted file transfer");
+            channelRef.current.send(data);
+            return true;
+        }
+        return false;
+    };
+
+    function handleAccept() {
+        const message = JSON.stringify({ type: "PERMISSION_GRANTED" });
+
+        if (sendData(message)) {
+            console.log("Accepted file transfer, sending PERMISSION_GRANTED");
             setShowDownloadButton(false);
             setReceiveStatus("Waiting for files...");
+        } else {
+            console.error("Could not send acceptance. No connection available.");
+            showError("Connection Error", "Could not accept the transfer.");
         }
     }
 
     const initializeFileTransfer = () => {
         fileDataRef.current = {};
-        filesCompleted.current = 0; // Reset completed files counter
+        filesCompleted.current = 0;
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,7 +153,6 @@ export default function Receiver() {
 
         bytesReceivedRef.current += chunk.byteLength;
 
-        // Update progress
         const progress = Math.round(
             (fileDataRef.current[fileId].receivedSize / fileDataRef.current[fileId].meta.size) * 100
         );
@@ -146,20 +175,15 @@ export default function Receiver() {
     }
 
     const cleanupAfterTransfer = () => {
-        // Clear file data from memory
         fileDataRef.current = {};
 
-        // Reset counters but keep totalFilesExpected for UI reference
         filesCompleted.current = 0;
 
-        // Reset progress and status
         setReceiveProgress(0);
         setReceiveStatus("Transfer complete. Ready for new transfer.");
 
-        // Clear pending ICE candidates
         pendingIceCandidates.current = [];
 
-        // Reset WebRTC connection state
         isLocalDescriptionSet.current = false;
 
         setReceivedFiles([]);
@@ -178,7 +202,6 @@ export default function Receiver() {
             if (success && receivedSize === meta.size) {
                 setReceiveStatus(`Received ${meta.name}`);
 
-                // Create and download file
                 const blob = new Blob(chunks, { type: meta.type });
                 const url = URL.createObjectURL(blob);
 
@@ -189,12 +212,10 @@ export default function Receiver() {
                 document.body.appendChild(a);
                 a.click();
 
-                // Cleanup
                 setTimeout(() => {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
 
-                    // Check if all files have been transferred
                     filesCompleted.current += 1;
                     if (filesCompleted.current >= totalFilesExpected.current) {
                         console.log("All files transferred and saved completely!");
@@ -203,13 +224,11 @@ export default function Receiver() {
                     }
                 }, 1000);
 
-                // Add to received files list
                 setReceivedFiles(prev => [...prev, { name: meta.name, size: meta.size, date: new Date() }]);
             } else {
                 console.warn(`File "${meta.name}" incomplete. Received ${receivedSize} of ${meta.size} bytes`);
                 setReceiveStatus(`Incomplete: ${meta.name}`);
 
-                // Still count as completed even if incomplete
                 filesCompleted.current += 1;
                 if (filesCompleted.current >= totalFilesExpected.current) {
                     console.log("All files processed (some may be incomplete)!");
@@ -218,13 +237,105 @@ export default function Receiver() {
                 }
             }
 
-            // Remove from tracking
             delete fileDataRef.current[fileId];
             setReceiveProgress(0);
         };
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handleDataMessage = async (e: MessageEvent<any>) => {
+            try {
+                if (typeof e.data === "string") {
+                    const msg = JSON.parse(e.data);
+
+                    if (msg.type === "REQUEST_PERMISSION") {
+                        console.log(`Sender requested to send ${msg.fileCount || 0} files`);
+                        totalFilesExpected.current = msg.fileCount || 0;
+                        if (msg.fileCount > 0) {
+                            setShowDownloadButton(true);
+                            setReceiveStatus(`Incoming request for ${msg.fileCount} files`);
+                        } else {
+                            console.log("No files to receive");
+                            setReceiveStatus("No files to receive");
+                        }
+                    }
+                    else if (msg.type === "FILE_META") {
+                        setUiState(false);
+                        handleFileMetadata(msg.fileId, {
+                            name: msg.name,
+                            size: msg.size,
+                            type: msg.type
+                        });
+                    }
+                    else if (msg.type === "FILE_END") {
+                        await finalizeFile(msg.fileId, msg.success);
+                    }
+                    return;
+                }
+
+                if (e.data instanceof ArrayBuffer) {
+                    const fileIds = Object.keys(fileDataRef.current);
+                    if (fileIds.length > 0) {
+                        const fileId = fileIds[fileIds.length - 1];
+                        handleFileChunk(fileId, e.data);
+                    } else {
+                        console.error("Received chunk but no active file transfer");
+                    }
+                }
+            } catch (error) {
+                console.error("Error handling message:", error);
+            }
+        }
+
+        const switchToRelay = () => {
+            if (relayWsRef.current?.readyState === WebSocket.OPEN) {
+                console.log("Already connected to relay");
+                return;
+            }
+
+            if (!roomCodeRef.current) {
+                console.error("No room code available");
+                return;
+            }
+
+            console.log("Switching to relay server");
+            console.log("Room code:", roomCodeRef.current);
+
+            if (pcRef.current) {
+                console.log("Closing WebRTC connection");
+                pcRef.current.close();
+                pcRef.current = null;
+            }
+            if (channelRef.current) {
+                channelRef.current.close();
+                channelRef.current = null;
+            }
+
+            const ws = new WebSocket(`https://v84mq4h9-8080.inc1.devtunnels.ms/relay?room=${roomCodeRef.current}&role=receiver`);
+
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = () => {
+                console.log("Connected to relay server");
+                setIsRTCConnected(true);
+            };
+
+            ws.onmessage = (event) => {
+                handleDataMessage(event);
+            };
+
+            ws.onerror = (error) => {
+                console.error("Relay error:", error);
+            };
+
+            ws.onclose = () => {
+                console.log("Relay closed");
+                setIsRTCConnected(false);
+            };
+
+            relayWsRef.current = ws;
+        };
+
         async function setupWebRTC() {
-            // 1. Create peer connection
             const pc = new RTCPeerConnection({
                 iceServers: [
                     { urls: "stun:stun.l.google.com:19302" },
@@ -236,7 +347,6 @@ export default function Receiver() {
             });
             pcRef.current = pc;
 
-            // 2. Setup data channel handler
             pc.ondatachannel = (event) => {
                 const channel = event.channel;
                 channelRef.current = channel;
@@ -248,50 +358,7 @@ export default function Receiver() {
                 };
 
                 channel.onmessage = async (e) => {
-                    try {
-                        // Handle JSON messages
-                        if (typeof e.data === "string") {
-                            const msg = JSON.parse(e.data);
-
-                            if (msg.type === "REQUEST_PERMISSION") {
-                                console.log(`Sender requested to send ${msg.fileCount || 0} files`);
-                                totalFilesExpected.current = msg.fileCount || 0; // Store the total files expected
-                                if (msg.fileCount > 0) {
-                                    setShowDownloadButton(true);
-                                    setReceiveStatus(`Incoming request for ${msg.fileCount} files`);
-                                } else {
-                                    console.log("No files to receive");
-                                    setReceiveStatus("No files to receive");
-                                }
-                            }
-                            else if (msg.type === "FILE_META") {
-                                setUiState(false);
-                                handleFileMetadata(msg.fileId, {
-                                    name: msg.name,
-                                    size: msg.size,
-                                    type: msg.type
-                                });
-                            }
-                            else if (msg.type === "FILE_END") {
-                                await finalizeFile(msg.fileId, msg.success);
-                            }
-                            return;
-                        }
-
-                        // Handle binary chunks (ArrayBuffer)
-                        if (e.data instanceof ArrayBuffer) {
-                            // Find the current file being received
-                            const fileIds = Object.keys(fileDataRef.current);
-                            if (fileIds.length > 0) {
-                                const fileId = fileIds[fileIds.length - 1];
-                                handleFileChunk(fileId, e.data);
-                            } else {
-                                console.error("Received chunk but no active file transfer");
-                            }
-                        }
-                    } catch (error) {
-                        console.error("Error handling message:", error);
-                    }
+                    handleDataMessage(e);
                 };
 
                 channel.onclose = () => {
@@ -302,24 +369,42 @@ export default function Receiver() {
                 };
             };
 
+            pc.oniceconnectionstatechange = () => {
+                console.log("P2P State:", pc.iceConnectionState);
+
+                if (pc.iceConnectionState === 'failed') {
+                    console.log("P2P failed - switching to relay");
+                    switchToRelay();
+                }
+
+                if (pc.iceConnectionState === 'disconnected') {
+                    console.log("P2P disconnected - switching to relay");
+                    switchToRelay();
+                }
+            };
+
+            // const timeout = setTimeout(() => {
+            //     if (pc.iceConnectionState !== 'connected') {
+            //         console.log("P2P timeout - switching to relay");
+            //         switchToRelay();
+            //     }
+            // }, 10000);
+
             pc.onicecandidate = (event) => {
                 if (event.candidate) {
                     if (isLocalDescriptionSet.current && socket) {
-                        // Send immediately if local description is set
                         console.log("Sending ICE candidate to sender");
                         socket.emit("signal", {
                             type: "ice",
                             candidate: event.candidate
                         });
                     } else {
-                        // Queue if local description not set yet
                         console.log("Queuing ICE candidate (local description not set)");
                         pendingIceCandidates.current.push(event.candidate);
                     }
                 }
             };
 
-            // 3. Handle incoming offer
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const offerHandler = async (message: any) => {
                 if (!socket) return;
@@ -327,7 +412,6 @@ export default function Receiver() {
                 if (message.type === "offer") {
                     console.log("Received offer from sender");
 
-                    // 4. Set remote description with offer
                     await pc.setRemoteDescription(
                         new RTCSessionDescription({
                             type: "offer",
@@ -335,7 +419,6 @@ export default function Receiver() {
                         })
                     );
 
-                    // 5. Create and send answer
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
 
@@ -347,7 +430,6 @@ export default function Receiver() {
 
                     isLocalDescriptionSet.current = true;
 
-                    // 6. Setup ICE candidate handler AFTER local description is set
                     while (pendingIceCandidates.current.length > 0) {
                         const candidate = pendingIceCandidates.current.shift();
                         if (socket) {
@@ -359,7 +441,6 @@ export default function Receiver() {
                         }
                     }
 
-                    // Remove offer handler after processing
                     socket.off("signal", offerHandler);
                 }
             };
@@ -368,7 +449,6 @@ export default function Receiver() {
 
             socket.on("signal", offerHandler);
 
-            // 7. Handle incoming ICE candidates (for sender's candidates)
             socket.on("signal", async (message) => {
                 if (message.type === "ice") {
                     console.log("Received ICE candidate from sender");
@@ -386,7 +466,6 @@ export default function Receiver() {
         setupWebRTC();
 
         return () => {
-            // Cleanup WebRTC
             if (channelRef.current) channelRef.current.close();
             if (pcRef.current) pcRef.current.close();
             setIsRTCConnected(false);
@@ -395,8 +474,6 @@ export default function Receiver() {
     }, [socket]);
 
     useEffect(() => {
-        // Forward wheel/touch to the list when pointer is over it.
-        // This avoids changing the Frame and doesn't break clicks elsewhere.
         let touchStartY: number | null = null;
         let startScrollTop: number | null = null;
 
@@ -410,9 +487,9 @@ export default function Receiver() {
         const wheelHandler = (e: WheelEvent) => {
             const el = listRef.current;
             if (!el) return;
-            // if pointer is over the list, consume and forward the delta
+
             if (isPointOverList(e.clientX, e.clientY)) {
-                e.preventDefault(); // requires passive: false when added
+                e.preventDefault();
                 el.scrollTop += e.deltaY;
             }
         };
@@ -436,13 +513,12 @@ export default function Receiver() {
             if (!el || touchStartY === null || startScrollTop === null) return;
             const t = e.touches[0];
             if (!t) return;
-            // we want to take control of the touch scrolling
-            e.preventDefault(); // requires passive: false when added
+
+            e.preventDefault();
             const dy = touchStartY - t.clientY;
             el.scrollTop = Math.max(0, startScrollTop + dy);
         };
 
-        // capture wheel globally so overlay elements can't swallow it first
         window.addEventListener("wheel", wheelHandler, { capture: true, passive: false });
         window.addEventListener("touchstart", touchStart, { capture: true, passive: true });
         window.addEventListener("touchmove", touchMove, { capture: true, passive: false });
@@ -455,7 +531,7 @@ export default function Receiver() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             window.removeEventListener("touchmove", touchMove as any, { capture: true } as any);
         };
-    }, []); // run once on mount
+    }, []);
 
 
     // Speed calculation effect
@@ -535,22 +611,22 @@ export default function Receiver() {
                                 </Button>
                                 <p>Secure connection established</p>
                                 <p className="mt-1">Data transfer protocol: No Encrypted</p>
-                                <p className="mt-1">Peers must match categories</p>
+                                {/* <p className="mt-1">Peers must match categories</p> */}
                             </div>
                         </div>
                     ) : (
                         !isRTCConnected ? (
                             <>
                                 <div className="flex flex-col items-center mb-8">
-                                    <div className="w-16 h-16 rounded-full flex items-center justify-center mb-2 bg-red-500/20 border border-red-500 animate-pulse">
-                                        <FiWifi className="text-3xl text-red-500" />
+                                    <div className="w-16 h-16 rounded-full flex items-center justify-center mb-2 bg-yellow-500/20 border border-yellow-500 animate-pulse">
+                                        <FiWifi className="text-3xl text-yellow-500" />
                                     </div>
-                                    <p className="text-red-500 font-medium">Awaiting Secure Connection....</p>
+                                    <p className="text-yellow-500 font-medium">Awaiting Secure Connection....</p>
                                 </div>
                                 <div className="text-center text-xs text-gray-400">
                                     <p>Awaiting connection established</p>
                                     <p className="mt-1">Data transfer protocol: No Encrypted</p>
-                                    <p className="mt-1">Peers must match categories</p>
+                                    {/* <p className="mt-1">Peers must match categories</p> */}
                                 </div>
                             </>
                         ) : (
@@ -564,7 +640,7 @@ export default function Receiver() {
                                 <div className="text-center text-xs text-gray-400">
                                     <p>Secure connection established</p>
                                     <p className="mt-1">Data transfer protocol: No Encrypted</p>
-                                    <p className="mt-1">Peers must match categories</p>
+                                    {/* <p className="mt-1">Peers must match categories</p> */}
                                 </div>
                             </>
                         )
