@@ -64,7 +64,13 @@ async fn main() {
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                
+                if let Ok(true) = is_http_request(&stream).await {
+                    tokio::spawn(async move {
+                        let _ = handle_http_health_check(stream).await;
+                    });
+                    continue;
+                }
+               
                 let rooms_clone = rooms.clone();
                
                 tokio::spawn(async move {
@@ -72,13 +78,6 @@ async fn main() {
                         eprintln!("Error handling connection: {}", e);
                     }
                 });
-
-                if let Ok(true) = is_http_request(&stream).await {
-                    tokio::spawn(async move {
-                        let _ = handle_http_health_check(stream).await;
-                    });
-                    continue;
-                }
             }
             Err(e) => {
                 eprintln!("Failed to accept connection: {}", e);
