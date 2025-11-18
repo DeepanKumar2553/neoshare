@@ -310,7 +310,7 @@ export default function Receiver() {
                 channelRef.current = null;
             }
 
-            const ws = new WebSocket(`https://neoshare-relay-server.onrender.com/relay?room=${roomCodeRef.current}&role=receiver`);
+            const ws = new WebSocket(`https://neoshare-relay-server.onrender.com/?room=${roomCodeRef.current}&role=receiver`);
 
             ws.binaryType = "arraybuffer";
 
