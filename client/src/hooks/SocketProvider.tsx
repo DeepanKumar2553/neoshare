@@ -17,8 +17,8 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
     setIsConnecting(true);
 
     // Create new socket connection
-    // const newSocket = io("https://neoshare.onrender.com");
-    const newSocket = io("https://v84mq4h9-8000.inc1.devtunnels.ms/");
+    const newSocket = io("https://neoshare.onrender.com");
+    // const newSocket = io("https://v84mq4h9-8000.inc1.devtunnels.ms/");
     // const newSocket = io("http://localhost:8080/");
 
     newSocket.on("connect", () => {
