@@ -59,10 +59,10 @@ async fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind to port {}",&addr);
-    
-    println!("Server listening on ws://0.0.0.0:8080");
+    .await
+      .expect(&format!("Failed to bind to port {}", port));
+
+      println!("Server listening on ws://0.0.0.0:{}", port);
    
     loop {
         match listener.accept().await {
