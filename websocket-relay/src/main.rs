@@ -19,6 +19,7 @@ async fn is_http_request(stream: &TcpStream) -> Result<bool, std::io::Error> {
 
 async fn handle_http_health_check(mut stream: TcpStream) -> Result<(), std::io::Error> {
     use tokio::io::AsyncWriteExt;
+    println!("Handling HTTP health check");
     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK";
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await?;
