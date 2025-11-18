@@ -10,11 +10,21 @@ use tokio::sync::Mutex;
 use url::Url;
 
 
+//health checkers
 async fn is_http_request(stream: &TcpStream) -> Result<bool, std::io::Error> {
-    let mut buffer = [0u8; 16];
+    let mut buffer = [0u8; 128];
     stream.peek(&mut buffer).await?;
     let request = String::from_utf8_lossy(&buffer);
-    Ok(request.starts_with("GET /") || request.starts_with("POST /") || request.starts_with("HEAD /"))
+    
+    // WebSocket connections have "Upgrade: websocket" header
+    // HTTP health checks don't
+    let is_websocket = request.contains("Upgrade:") || request.contains("upgrade:");
+    let is_http = request.starts_with("GET /") || request.starts_with("POST /") || request.starts_with("HEAD /");
+    
+    println!("Request preview: {:?}..., is_websocket: {}, treating as HTTP: {}", 
+             &request[..request.len().min(50)], is_websocket, is_http && !is_websocket);
+    
+    Ok(is_http && !is_websocket)
 }
 
 async fn handle_http_health_check(mut stream: TcpStream) -> Result<(), std::io::Error> {
