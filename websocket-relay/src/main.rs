@@ -15,11 +15,9 @@ async fn is_http_request(stream: &TcpStream) -> Result<bool, std::io::Error> {
     let mut buffer = [0u8; 1024];  // Increased buffer
     stream.peek(&mut buffer).await?;
     let request = String::from_utf8_lossy(&buffer);
-    
-    // WebSocket connections have "Upgrade: websocket" header
+   
     let is_websocket = request.to_lowercase().contains("upgrade: websocket");
-    
-    // Check if it has query parameters (room and role)
+   
     let has_params = request.contains("?room=") && request.contains("&role=");
     
     let is_http = request.starts_with("GET /") || request.starts_with("POST /") || request.starts_with("HEAD /");
@@ -290,6 +288,12 @@ async fn relay_messages(
                         // println!("{} sent {} bytes", role, data.len());
                        
                         forward_message(&rooms, &room_code, &role, Message::Binary(data)).await?;
+                    }
+                    Message::Ping(payload) => {
+                        println!("{} received ping in room {}", role, room_code);
+                    }
+                    Message::Pong(_) => {
+                        println!("{} received pong in room {}", role, room_code);
                     }
                     Message::Close(_) => {
                         // println!("{} closed connection in room {}", role, room_code);

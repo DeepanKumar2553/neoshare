@@ -326,9 +326,16 @@ export default function Sender() {
 
       const ws = new WebSocket(`https://neoshare-relay-server.onrender.com/?room=${roomCodeRef.current}&role=sender`);
 
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 20000);
+
       ws.onopen = () => {
         console.log("Connected to relay server");
         setIsRTCConnected(true);
+        clearInterval(pingInterval);
       };
 
       ws.onmessage = (event) => {
