@@ -37,6 +37,23 @@ async fn handle_http_health_check(mut stream: TcpStream) -> Result<(), std::io::
     Ok(())
 }
 
+//keeper - 15 to 30 sec req, res
+async fn keep_alive_pinger(rooms: Rooms) {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        
+        let mut rooms_map = rooms.lock().await;
+        for (room_code, room) in rooms_map.iter_mut() {
+            if let Some(sender) = &mut room.sender {
+                let _ = sender.send(Message::Ping(vec![])).await;
+            }
+            if let Some(receiver) = &mut room.receiver {
+                let _ = receiver.send(Message::Ping(vec![])).await;
+            }
+        }
+    }
+}
+
 
 struct Room {
     room_code: String,
@@ -66,6 +83,11 @@ async fn main() {
     println!("Starting WebSocket Relay Server with Room Management...");
     
     let rooms: Rooms = Arc::new(Mutex::new(HashMap::new()));
+
+    let rooms_clone = rooms.clone();
+    tokio::spawn(async move {
+        keep_alive_pinger(rooms_clone).await;
+    });
     
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("0.0.0.0:{}", port);
