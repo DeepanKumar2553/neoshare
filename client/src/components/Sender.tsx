@@ -312,7 +312,8 @@ export default function Sender() {
       }
 
       console.log("Switching to relay server");
-      console.log("Room code:", roomCodeRef.current);
+
+      showError("P2P Failed", "Switched To Relay");
 
       if (pcRef.current) {
         console.log("Closing WebRTC connection");
