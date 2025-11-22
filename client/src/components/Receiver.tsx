@@ -299,8 +299,6 @@ export default function Receiver() {
 
             console.log("Switching to relay server");
 
-            showError("P2P Failed", "Switched To Relay");
-
             if (pcRef.current) {
                 console.log("Closing WebRTC connection");
                 pcRef.current.close();
@@ -317,6 +315,7 @@ export default function Receiver() {
 
             ws.onopen = () => {
                 console.log("Connected to relay server");
+                showError("P2P Failed", "Switched To Relay");
                 setIsRTCConnected(true);
             };
 
